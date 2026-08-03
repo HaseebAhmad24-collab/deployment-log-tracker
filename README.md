@@ -147,19 +147,20 @@ Delete a log entry: removes the S3 object and the database row.
 
 `backend/src/config.js` is the single place that resolves configuration. It
 currently reads everything from `process.env` (populated by `.env` locally,
-or by real environment variables set via PM2/systemd in production). To
-switch to AWS Secrets Manager:
+or by real environment variables set via PM2/systemd in production).
 
-1. In `config.js`, replace the body of `loadSecrets()` with a call to
-   `SecretsManagerClient` / `GetSecretValueCommand` to fetch a JSON secret
-   containing the same keys (DB host/user/password/name, AWS region, bucket
-   name).
-2. Merge the returned values into the same `config` object shape that's
-   returned today.
+Secrets Manager support is already built in: set `SECRETS_MANAGER_SECRET_NAME`
+to the name/ARN of a secret (type "Other type of secret", key/value pairs
+`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `S3_BUCKET_NAME`,
+`AWS_REGION`) and `config.ensureLoaded()` fetches it at startup via
+`@aws-sdk/client-secrets-manager`, overriding the equivalent `.env` values.
+The EC2 instance role needs `secretsmanager:GetSecretValue` scoped to that
+secret's ARN. Leave `SECRETS_MANAGER_SECRET_NAME` unset for local dev and it
+falls back to `.env` only.
 
 Because every other module (`db.js`, `s3.js`, routes) only ever imports
 `config` from `config.js` and never reads `process.env` directly, no other
-file needs to change.
+file needs to change to support this.
 
 ## Notes
 
