@@ -1,4 +1,5 @@
 # Deployment Log Tracker
+<!-- CI/CD test push -->
 
 Full-stack app for logging deployments: a message plus a screenshot, stored in
 MySQL (RDS) and S3. List view generates fresh signed S3 URLs on every request.
