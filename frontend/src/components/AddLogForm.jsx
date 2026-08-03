@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { createLog } from '../api';
+import { useToast } from '../toast';
 
 export default function AddLogForm({ onLogAdded }) {
   const [message, setMessage] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const showToast = useToast();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,8 +29,10 @@ export default function AddLogForm({ onLogAdded }) {
       setImageFile(null);
       e.target.reset();
       onLogAdded(newLog);
+      showToast('Deployment log added');
     } catch (err) {
       setError(err.message || 'Failed to add log');
+      showToast(err.message || 'Failed to add log', 'error');
     } finally {
       setSubmitting(false);
     }

@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { deleteLog } from '../api';
+import { useToast } from '../toast';
 
 function formatDate(dateString) {
   return new Date(dateString).toLocaleString();
 }
 
-export default function LogList({ logs, loading, error, onLogDeleted }) {
+export default function LogList({ logs, loading, error, hasLoaded, onLogDeleted }) {
   const [deletingId, setDeletingId] = useState(null);
   const [deleteError, setDeleteError] = useState('');
+  const showToast = useToast();
 
   const handleDelete = async (id) => {
     setDeleteError('');
@@ -15,8 +17,10 @@ export default function LogList({ logs, loading, error, onLogDeleted }) {
     try {
       await deleteLog(id);
       onLogDeleted(id);
+      showToast('Deployment log deleted');
     } catch (err) {
       setDeleteError(err.message || 'Failed to delete log');
+      showToast(err.message || 'Failed to delete log', 'error');
     } finally {
       setDeletingId(null);
     }
@@ -28,6 +32,10 @@ export default function LogList({ logs, loading, error, onLogDeleted }) {
 
   if (error) {
     return <p className="error-text">{error}</p>;
+  }
+
+  if (!hasLoaded) {
+    return <p className="status-text">Click "List History" to load deployment logs.</p>;
   }
 
   if (logs.length === 0) {

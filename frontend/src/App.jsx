@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import AddLogForm from './components/AddLogForm';
 import LogList from './components/LogList';
 import { fetchLogs } from './api';
+import { useToast } from './toast';
 
 export default function App() {
   const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [hasLoadedHistory, setHasLoadedHistory] = useState(false);
+  const showToast = useToast();
 
   const loadLogs = async () => {
     setLoading(true);
@@ -14,19 +17,20 @@ export default function App() {
     try {
       const data = await fetchLogs();
       setLogs(data);
+      setHasLoadedHistory(true);
+      showToast('Deployment logs loaded');
     } catch (err) {
       setError(err.message || 'Failed to fetch logs');
+      showToast(err.message || 'Failed to fetch logs', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
+  const handleListHistory = (e) => {
+    e.preventDefault();
     loadLogs();
-  }, []);
-
-  const handleLogAdded = () => {
-    loadLogs();
+    document.getElementById('history')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const handleLogDeleted = (id) => {
@@ -49,12 +53,14 @@ export default function App() {
         <nav className="site-nav">
           <a href="#hero">Overview</a>
           <a href="#add-log">Add Log</a>
-          <a href="#history">History</a>
+          <a href="#history" onClick={handleListHistory}>
+            List History
+          </a>
         </nav>
 
         <div className="header-actions">
-          <a className="pill pill-light" href="#history">
-            History
+          <a className="pill pill-light" href="#history" onClick={handleListHistory}>
+            List History
           </a>
           <a className="pill pill-dark" href="#add-log">
             <span className="pill-arrow" aria-hidden="true">
@@ -101,15 +107,15 @@ export default function App() {
             </span>
             Add a deployment log
           </a>
-          <a className="pill pill-light" href="#history">
-            View history
+          <a className="pill pill-light" href="#history" onClick={handleListHistory}>
+            List History
           </a>
         </div>
       </section>
 
       <main className="content">
         <section id="add-log" className="section">
-          <AddLogForm onLogAdded={handleLogAdded} />
+          <AddLogForm onLogAdded={() => {}} />
         </section>
 
         <section id="history" className="section">
@@ -118,6 +124,7 @@ export default function App() {
             logs={logs}
             loading={loading}
             error={error}
+            hasLoaded={hasLoadedHistory}
             onLogDeleted={handleLogDeleted}
           />
         </section>
