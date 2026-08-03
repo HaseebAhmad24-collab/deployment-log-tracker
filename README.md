@@ -1,172 +1,323 @@
-# Deployment Log Tracker
-<!-- CI/CD test push -->
+<div align="center">
 
-Full-stack app for logging deployments: a message plus a screenshot, stored in
-MySQL (RDS) and S3. List view generates fresh signed S3 URLs on every request.
+# 📦 Deployment Log Tracker
 
-## Project structure
+**A lightweight, cloud-native log tracker built to demonstrate a complete AWS DevOps pipeline —
+from a React/Node application to fully automated CI/CD deployment.**
+
+[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![AWS](https://img.shields.io/badge/AWS-EC2%20%7C%20RDS%20%7C%20S3-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white)](https://aws.amazon.com/)
+[![Jenkins](https://img.shields.io/badge/CI%2FCD-Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)](https://www.jenkins.io/)
+[![MySQL](https://img.shields.io/badge/Database-MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](#license)
+
+</div>
+
+---
+
+## 📖 Overview
+
+**Deployment Log Tracker** is a minimal full-stack application where users can log a short note
+with an accompanying screenshot/image — think of it as a mini audit trail for deployments. It
+was built to showcase a production-style AWS deployment: direct EC2 hosting (no containers),
+private RDS, private S3 with signed URLs, secrets pulled from AWS Secrets Manager at runtime,
+and a Jenkins pipeline that auto-deploys on every push to `main`.
+
+| | |
+|---|---|
+| **Frontend** | React (Vite) |
+| **Backend** | Node.js + Express |
+| **Database** | MySQL (Amazon RDS) |
+| **Storage** | Amazon S3 (private, signed URLs) |
+| **Secrets** | AWS Secrets Manager |
+| **CI/CD** | Jenkins (GitHub webhook triggered) |
+| **Web Server** | Nginx (reverse proxy) + PM2 (process manager) |
+| **Domain/SSL** | Cloudflare DNS + Let's Encrypt (Certbot) |
+
+---
+
+## ✨ Features
+
+- 📝 Add a log entry with a text note + image upload
+- 📋 Load all entries on demand via the **List History** button, with images loaded via
+  **temporary signed S3 URLs**
+- 🗑️ Delete an entry (removes both the S3 object and the database record)
+- 🔔 Toast notifications confirm every add/list/delete — success or failure
+- 🔒 Zero hardcoded credentials — all secrets fetched from **AWS Secrets Manager** at runtime
+  (falls back to `.env` for local dev)
+- ⚙️ Fully automated deployment — push to `main` → Jenkins builds & deploys, no manual steps
+- 🌐 Custom domain with HTTPS (Let's Encrypt), no load balancer required
+
+---
+
+## 🗄️ Database Schema
+
+Table `deployment_logs` (created automatically at backend startup if it doesn't exist):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INT` | Primary key, auto increment |
+| `message` | `VARCHAR(255)` | Not null |
+| `image_key` | `VARCHAR(255)` | Not null — S3 object key only, never a full URL |
+| `created_at` | `TIMESTAMP` | Default `CURRENT_TIMESTAMP` |
+
+---
+
+## 🏗️ Architecture Diagram
+
+```mermaid
+flowchart TB
+    Dev["👩‍💻 Developer"] -->|"git push main"| GH["GitHub Repository"]
+    GH -->|"Webhook"| JK["Jenkins EC2<br/>(CI/CD Pipeline)"]
+
+    JK -->|"1 Checkout"| GH
+    JK -->|"2 Install & Build"| JK
+    JK -->|"3 SSH Deploy"| APP
+
+    subgraph AWS["AWS Cloud"]
+        subgraph APP["App Server EC2 (Ubuntu 22.04)"]
+            NG["Nginx<br/>Reverse Proxy :80/443"]
+            PM["PM2"]
+            ND["Node.js Backend :5000"]
+            RC["React Build<br/>(static files)"]
+            NG --> RC
+            NG -->|"/api"| ND
+            PM --> ND
+        end
+
+        SM["AWS Secrets Manager<br/>(DB + S3 config)"]
+        RDS["Amazon RDS MySQL<br/>(private, assessment_db)"]
+        S3["Amazon S3<br/>(private bucket, images)"]
+        IAM["IAM Role<br/>(least-privilege)"]
+
+        IAM -.->|"grants access"| ND
+        ND -->|"fetch secrets"| SM
+        ND -->|"SQL queries"| RDS
+        ND -->|"upload/fetch/delete + signed URLs"| S3
+    end
+
+    User["🌍 End User"] -->|"https://yourdomain.online"| CF["Cloudflare DNS"]
+    CF --> NG
+
+    style AWS fill:#FFF8E1,stroke:#FF9900,stroke-width:2px
+    style APP fill:#E8F5E9,stroke:#4CAF50,stroke-width:1px
+```
+
+---
+
+## 🔄 User Flow Diagram
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant FE as React Frontend
+    participant BE as Node.js Backend
+    participant S3 as Amazon S3
+    participant DB as RDS MySQL
+
+    Note over U,DB: ➕ Add Log Entry
+    U->>FE: Enter message + select image
+    FE->>BE: POST /api/logs (multipart form)
+    BE->>S3: Upload image → get object key
+    BE->>DB: INSERT message + image_key
+    BE-->>FE: 201 Created
+    FE-->>U: Toast "Deployment log added"
+
+    Note over U,DB: 📋 List Log Entries
+    U->>FE: Click "List History"
+    FE->>BE: GET /api/logs
+    BE->>DB: SELECT * FROM deployment_logs
+    DB-->>BE: rows (message, image_key, created_at)
+    BE->>S3: Generate signed URL per image_key
+    BE-->>FE: [{ message, image_url, created_at }]
+    FE-->>U: Renders cards with live images + toast
+
+    Note over U,DB: 🗑️ Delete Log Entry
+    U->>FE: Click "Delete" on an entry
+    FE->>BE: DELETE /api/logs/:id
+    BE->>S3: Delete object (image_key)
+    BE->>DB: DELETE row WHERE id
+    BE-->>FE: 200 OK
+    FE-->>U: Entry removed from list + toast
+```
+
+---
+
+## 📁 Project Structure
 
 ```
-/backend
-  /src
-    config.js       # loads all secrets from process.env (see note below)
-    db.js           # MySQL pool + schema bootstrap
-    s3.js           # S3 upload/delete/signed-url helpers
-    routes/logs.js  # POST/GET/DELETE /api/logs
-    app.js          # Express app (CORS, routes, error handling)
-    server.js       # entry point
-  .env.example
-  package.json
-/frontend
-  /src
-    App.jsx
-    components/AddLogForm.jsx
-    components/LogList.jsx
-    api.js
-  .env.example
-  package.json
+deployment-log-tracker/
+├── backend/
+│   ├── src/
+│   │   ├── config.js       # Loads secrets (Secrets Manager → .env fallback)
+│   │   ├── db.js           # MySQL connection pool + schema bootstrap
+│   │   ├── s3.js           # S3 client + upload/delete/signed URL helpers
+│   │   ├── routes/logs.js  # /api/logs — POST, GET, DELETE
+│   │   ├── app.js          # Express app (CORS, routes, error handling)
+│   │   └── server.js       # Entry point
+│   ├── .env.example
+│   └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   ├── toast.jsx        # Toast notification context/provider
+│   │   ├── index.css
+│   │   ├── components/
+│   │   │   ├── AddLogForm.jsx
+│   │   │   └── LogList.jsx
+│   │   └── api.js
+│   ├── index.html
+│   ├── vite.config.js
+│   ├── .env.example
+│   └── package.json
+├── Jenkinsfile
+├── AWS_DevOps_Deployment_Guide.md
+├── .gitignore
+└── README.md
 ```
 
-## Requirements
+---
 
-- Node.js 18+
-- A MySQL database (e.g. AWS RDS) reachable from the machine running the backend
-- An S3 bucket and AWS credentials (IAM user or role) with `s3:PutObject`,
-  `s3:GetObject`, `s3:DeleteObject` on that bucket
+## 🔌 API Reference
 
-The backend creates the `deployment_logs` table automatically on startup if it
-doesn't exist, so no manual migration is required (the DB itself must already
-exist).
+| Method | Endpoint | Description | Body |
+|---|---|---|---|
+| `POST` | `/api/logs` | Add a new log entry | `multipart/form-data` → `message`, `image` |
+| `GET` | `/api/logs` | List all entries with signed image URLs | — |
+| `DELETE` | `/api/logs/:id` | Delete an entry (S3 object + DB row) | — |
 
-## Setup — backend
+**Example response — `GET /api/logs`**
+```json
+[
+  {
+    "id": 1,
+    "message": "Fixed login bug",
+    "image_url": "https://<bucket>.s3.amazonaws.com/...&X-Amz-Signature=...",
+    "created_at": "2026-08-03T10:15:00.000Z"
+  }
+]
+```
+
+---
+
+## ⚙️ Environment Variables
+
+No values are ever hardcoded. Locally, use `.env`; in production, values are pulled live from
+**AWS Secrets Manager** using the secret name below.
+
+**`backend/.env.example`**
+```env
+# MySQL (RDS) connection
+DB_HOST=your-rds-endpoint.rds.amazonaws.com
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+DB_NAME=deployment_log_tracker
+
+# AWS
+AWS_REGION=us-east-1
+# Leave these unset to use the default AWS credential provider chain
+# (IAM role, ~/.aws/credentials, etc). Only set them for local dev.
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+
+# S3
+S3_BUCKET_NAME=your-s3-bucket-name
+
+# Server
+PORT=5000
+# Origin allowed to call this API (the frontend's URL)
+CORS_ORIGIN=http://localhost:5173
+
+# Production only: name/ARN of a Secrets Manager secret holding a JSON object
+# with DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, S3_BUCKET_NAME, AWS_REGION.
+# When set, these override the values above. Leave unset for local dev.
+SECRETS_MANAGER_SECRET_NAME=
+```
+
+**`frontend/.env.example`**
+```env
+# Base URL of the backend API (no trailing slash, no /api suffix — the
+# frontend appends /api/logs itself)
+VITE_API_BASE_URL=http://localhost:5000
+```
+
+---
+
+## 🚀 Local Setup
 
 ```bash
+# 1. Clone
+git clone https://github.com/HaseebAhmad24-collab/deployment-log-tracker.git
+cd deployment-log-tracker
+
+# 2. Backend
 cd backend
+cp .env.example .env   # fill in local DB/S3 values or a Secrets Manager name
 npm install
-cp .env.example .env
-# edit .env with your real values
-npm start          # or: npm run dev (auto-restarts on file changes)
-```
+npm run dev
 
-Backend listens on `PORT` (default `5000`).
-
-## Setup — frontend
-
-```bash
+# 3. Frontend (new terminal)
 cd frontend
-npm install
 cp .env.example .env
-# edit .env if your backend isn't on http://localhost:5000
+npm install
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173` by default (Vite).
+Backend listens on `PORT` (default `5000`). Frontend runs on `http://localhost:5173` (Vite).
 
-## Environment variables
+---
 
-### Backend (`backend/.env`)
+## ☁️ Production Deployment
 
-| Variable | Description |
+| Stage | Tooling |
 |---|---|
-| `DB_HOST` | MySQL/RDS host endpoint |
-| `DB_USER` | MySQL user |
-| `DB_PASSWORD` | MySQL password |
-| `DB_NAME` | Database name |
-| `AWS_REGION` | AWS region the S3 bucket lives in |
-| `AWS_ACCESS_KEY_ID` | AWS access key (optional — omit to use the default credential provider chain, e.g. an IAM role) |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret key (optional, same as above) |
-| `S3_BUCKET_NAME` | S3 bucket used to store uploaded images |
-| `PORT` | Port the Express server listens on (default `5000`) |
-| `CORS_ORIGIN` | Origin allowed to call the API (the frontend's URL) |
+| Infrastructure | EC2 (App Server), EC2 (Jenkins), RDS MySQL (private), S3 (private) |
+| Secrets | AWS Secrets Manager, fetched at app startup |
+| Access control | IAM role (least privilege) on the App Server — no static AWS keys in code |
+| Web server | Nginx reverse proxy → PM2-managed Node process |
+| CI/CD | Jenkins pipeline, triggered by GitHub webhook on every push to `main` |
+| Domain/SSL | Cloudflare DNS (A record → EC2 IP) + Certbot (Let's Encrypt) |
 
-### Frontend (`frontend/.env`)
+Full step-by-step infrastructure setup is documented separately in
+[`AWS_DevOps_Deployment_Guide.md`](./AWS_DevOps_Deployment_Guide.md).
 
-| Variable | Description |
-|---|---|
-| `VITE_API_BASE_URL` | Base URL of the backend API, e.g. `http://localhost:5000` |
+### CI/CD Pipeline Flow
+1. Developer pushes to `main` on GitHub
+2. GitHub webhook triggers the Jenkins pipeline
+3. Jenkins checks out the code, installs dependencies, builds the frontend
+4. Jenkins SSHes into the App Server, pulls the latest code, rebuilds, and restarts the app via PM2
+5. Pipeline verifies the deployment with a health check request
+6. Zero manual steps required after `git push`
 
-## Running locally
+---
 
-1. Start MySQL/RDS and make sure the database in `DB_NAME` exists.
-2. Start the backend: `cd backend && npm start`.
-3. Start the frontend: `cd frontend && npm run dev`.
-4. Open `http://localhost:5173`, add a log with a message + image, confirm it
-   appears in the list with a working image, then delete it and confirm it's
-   gone from both the list and (if you check) the S3 bucket.
+## 🔐 Security Notes
 
-## API documentation
+- RDS has **no public access** — reachable only from the App Server's security group
+- S3 bucket blocks **all public access** — images are served via short-lived **signed URLs**
+- IAM role attached to the App Server is scoped to only the specific S3 bucket and Secrets Manager secret it needs
+- No credentials, API keys, or connection strings are committed to source control
+- HTTPS enforced via Let's Encrypt, with automatic certificate renewal
 
-Base path: `/api/logs`
+---
 
-### `POST /api/logs`
+## 📝 Assumptions
 
-Add a deployment log entry.
+- Single-region deployment, no high-availability/multi-AZ setup (out of scope for this assessment)
+- Domain DNS is managed via Cloudflare in "DNS only" mode since SSL is handled by Certbot on the origin server
+- No ALB is used — DNS resolves directly to the EC2 App Server's public IP, per assessment requirements
+- Application runs directly on EC2 (PM2), no containers/Docker
 
-- **Request**: `multipart/form-data`
-  - `message` (text, required, non-empty)
-  - `image` (file, required, jpg/jpeg/png only, max 5MB)
-- **Response** `201 Created`:
-  ```json
-  {
-    "id": 1,
-    "message": "Deployed backend v1.2.3 to production",
-    "image_key": "b3f1c2a4-....jpg",
-    "created_at": "2026-08-02T10:00:00.000Z"
-  }
-  ```
-- **Errors**: `400` (missing message/image, invalid file type, file too large), `500`
+---
 
-### `GET /api/logs`
+## 📄 License
 
-List all deployment logs, most recent first, each with a freshly generated
-signed S3 URL (expires in 1 hour).
+This project is provided as-is for assessment/demonstration purposes.
 
-- **Response** `200 OK`:
-  ```json
-  [
-    {
-      "id": 1,
-      "message": "Deployed backend v1.2.3 to production",
-      "image_url": "https://<bucket>.s3.<region>.amazonaws.com/....jpg?X-Amz-Signature=...",
-      "created_at": "2026-08-02T10:00:00.000Z"
-    }
-  ]
-  ```
-- **Errors**: `500`
+<div align="center">
 
-### `DELETE /api/logs/:id`
+Built with ❤️ for the AWS DevOps Engineer Technical Assessment
 
-Delete a log entry: removes the S3 object and the database row.
-
-- **Response** `200 OK`:
-  ```json
-  { "success": true, "message": "Deployment log deleted" }
-  ```
-- **Errors**: `404` (id not found), `500`
-
-## Secrets Manager in production
-
-`backend/src/config.js` is the single place that resolves configuration. It
-currently reads everything from `process.env` (populated by `.env` locally,
-or by real environment variables set via PM2/systemd in production).
-
-Secrets Manager support is already built in: set `SECRETS_MANAGER_SECRET_NAME`
-to the name/ARN of a secret (type "Other type of secret", key/value pairs
-`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `S3_BUCKET_NAME`,
-`AWS_REGION`) and `config.ensureLoaded()` fetches it at startup via
-`@aws-sdk/client-secrets-manager`, overriding the equivalent `.env` values.
-The EC2 instance role needs `secretsmanager:GetSecretValue` scoped to that
-secret's ARN. Leave `SECRETS_MANAGER_SECRET_NAME` unset for local dev and it
-falls back to `.env` only.
-
-Because every other module (`db.js`, `s3.js`, routes) only ever imports
-`config` from `config.js` and never reads `process.env` directly, no other
-file needs to change to support this.
-
-## Notes
-
-- No Docker/containers — run directly with `node`/`npm`. In production, use
-  PM2 or a systemd unit to keep the backend process alive.
-- Images are never served via a public/permanent S3 URL — only the
-  `image_key` is stored, and a signed URL is generated fresh on each
-  `GET /api/logs` call.
+</div>
